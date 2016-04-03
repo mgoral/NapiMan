@@ -385,6 +385,10 @@ def get_soup(url, post_data = None):
     return BeautifulSoup(resp.text, "html.parser")
 
 def main():
+    if not sys.stdout.isatty():
+        log.critical("NapiMan is interactive program. Don't use it in scripts, pipes etc.")
+        sys.exit(2)
+
     opt_parser = prepare_parser()
     args = opt_parser.parse_args()
 
@@ -403,9 +407,8 @@ def main():
 
         try:
             name, season, episode = parse_input(filename, args)
-            print("  * Title: %s, season: %s, episode: %s"  % (bold(name), season, episode))
-
             movie_data = get_movie_data(filename)
+
             if (movie_url is None or not args.one_season):
                 movie_search_post = {
                     "queryString" : name,
@@ -413,12 +416,16 @@ def main():
                     "queryYear" : "",
                     "associate" : ""
                 }
+
+                print("  * Search query: %s, season: %s, episode: %s"  %
+                    (bold(name), season, episode))
+
                 catalog_url = "http://www.napiprojekt.pl/ajax/search_catalog.php"
                 soup = get_soup(catalog_url, movie_search_post)
                 links = get_movie_pages(soup)
                 movie_url = get_movie_page_url(links, name, args)
 
-            print("  * %s" % movie_data)
+            print("  * Video: %s" % movie_data)
 
             url = add_season(movie_url, season, episode)
             soup = get_soup(url)
@@ -434,16 +441,15 @@ def main():
                     sub = choose(subs, "Many subtitles found, please choose one")
                 else:
                     sub = subs[0]
-                    print("  * Chosen subtitles: %s" % sub)
+                    print("  * Best subtitles parameters: %s" % sub.time_info)
 
                 downloaded_path = download(sub, movie_data)
-                print("  * Downloaded subtitles: %s" % green(downloaded_path))
+                print("  * Downloaded subtitles: %s" % downloaded_path)
             print("")
         except Exception as e:
             log.error("Exception occured during processing of file %s. Skipping." % filename)
             log.debug(e)
 
-
-    return 0
+    sys.exit(0)
 
 main()

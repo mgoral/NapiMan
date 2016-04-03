@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Copyright (C) 2016 Michał Góral.
 #
 # This file is part of NapiMan
@@ -23,159 +21,47 @@ import logging
 import argparse
 import re
 import tempfile
-import locale
-import shutil
-import datetime
-
+import logging
 import subprocess
+
+import requests
+import bs4
+
+from nm.util import abs_diff, nm_assert, ErrorCode, ExceptionWithCode
+from nm.time import Time
+from nm.datatypes import PageInfo, SubInfo, MovieInfo
+from nm.printing import use_colors, underline, bold, red, purple, blue, green
 
 log = logging.getLogger('NapiMan')
 
-use_colors = True
+def prepare_parser():
+    parser = argparse.ArgumentParser(description = "By-name, by-time subtitle downloader.")
 
-def colorize(s, c):
-    if use_colors is True:
-        ENDC = "\033[0m"
-        return "%s%s%s" % (c, s, ENDC)
-    return s
+    parser.add_argument("files", metavar = "FILE", nargs="+",
+        type = os.path.expanduser, help="movie files to open")
 
-def green(s):
-    return colorize(s, "\033[92m")
+    parser.add_argument("-t", "--title", metavar = "STRING", type = str, default = "",
+        help = "force searching for a video with a given title")
+    parser.add_argument("-s", "--season", metavar = "NUMBER", type = int, default = None,
+        help = "force season number to be searched")
+    parser.add_argument("-e", "--episode", metavar = "NUMBER", type = int, default = None,
+        help = "force episode number to be searched")
 
-def blue(s):
-    return colorize(s, "\033[94m")
+    parser.add_argument("--one-season", action = "store_true", dest = "one_season",
+        help = "indicate that all videos come from a single season")
 
-def purple(s):
-    return colorize(s, "\033[95m")
+    parser.add_argument("-m", "--manual", action = "store_true", dest = "manual_sub",
+        help = "show a subtitle list to choose from")
 
-def red(s):
-    return colorize(s, "\033[91m")
+    parser.add_argument("--no-color", action = "store_false", dest = "no_color",
+        help = "don't color program output")
 
-def bold(s):
-    return colorize(s, "\033[1m")
+    parser.add_argument("--debug", action = "store_true", help = "enable debug printing")
 
-def underline(s):
-    return colorize(s, "\033[4m")
-
-try:
-    import requests
-except ImportError:
-    log.critical(red("request library not installed."))
-    sys.exit(1)
-
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    log.critical(red("BeautifulSoup4 library not installed."))
-    sys.exit(1)
-
-class Time:
-    # Yeah, I copied most of things here from Subconvert. Because why not?
-    def __init__(self, time_string=None, seconds=None):
-        if seconds is None and time_string is not None:
-            self.__from_str(time_string)
-        elif seconds is not None and time_string is None:
-            self.__from_int(float(seconds))
-
-    def __from_int(self, seconds):
-        if seconds >= 0:
-            self._full_seconds = seconds
-        else:
-            raise ValueError("Incorrect seconds value.")
-
-        self._hours = int(seconds / 3600)
-        seconds = round(seconds - self._hours * 3600, 3)
-        self._minutes = int(seconds / 60)
-        seconds = round(seconds - self._minutes * 60, 3)
-        self._seconds = int(seconds)
-        self._miliseconds = int(round(1000 * (seconds - self._seconds)))
-
-    def __from_str(self, value):
-        time = re.match(
-            r"(?P<h>\d+):(?P<m>[0-5][0-9]):(?P<s>[0-5][0-9])(?:$|\.(?P<ms>\d{1,3}))", value)
-
-        if time is None:
-            raise ValueError("Incorrect time format.")
-
-        if time.group('ms') is not None:
-            # ljust explenation:
-            # 10.1 != 10.001
-            # 10.1 == 10.100
-            self._miliseconds = int(time.group('ms').ljust(3, '0'))
-        else:
-            self._miliseconds = 0
-        self._seconds = int(time.group('s'))
-        self._minutes = int(time.group('m'))
-        self._hours = int(time.group('h'))
-        self._full_seconds = (3600*self._hours + 60*self._minutes + self._seconds + float(self._miliseconds)/1000)
-
-    def __str__(self):
-        return "%s:%s:%s.%s" % (self._hours, self._minutes, self._seconds, self._miliseconds)
-
-    def __sub__(self, other):
-        if self._full_seconds < other._full_seconds:
-            raise RuntimeError("Cannot substract higher time from lower")
-
-        result = self._full_seconds - other._full_seconds
-        return Time(seconds = result)
-
-    def __lt__(self, other):
-        return self._full_seconds < other._full_seconds
-
-    def __gt__(self, other):
-        return self._full_seconds > other._full_seconds
-
-def abs_diff(lhs, rhs):
-    if lhs < rhs:
-        return rhs - lhs
-    else:
-        return lhs - rhs
-
-class TimeInfo:
-    def __init__(self):
-        self.fps = None
-        self.length = None
-
-    def __str__(self):
-        return "fps: %s, length: %s" % (green(self.fps), blue(self.length))
-
-    def __sub__(self, other):
-        new = TimeInfo()
-        new.fps = abs_diff(self.fps, other.fps)
-        new.length = abs_diff(self.length, other.length)
-        return new
-
-    def __lt__(self, other):
-        return self.fps < other.fps or (self.fps == other.fps and self.length < other.length)
-
-class PageInfo:
-    def __init__(self):
-        self.url = None
-        self.name = None
-
-    def __str__(self):
-        return self.name
-
-class SubInfo:
-    def __init__(self):
-        self.sub_hash = None
-        self.name = None
-        self.time_info = TimeInfo()
-
-    def __str__(self):
-        return "%s, %s" % (self.name, self.time_info)
-
-class MovieInfo:
-    def __init__(self):
-        self.path = None
-        self.time_info = TimeInfo()
-
-    def __str__(self):
-        return "%s, %s" % (os.path.basename(self.path), self.time_info)
+    return parser
 
 def choose(list_, question):
-    if len(list_) == 0:
-        raise Exception("empty list")
+    nm_assert(len(list_) > 0, "empty list")
 
     if len(list_) == 1:
         return list_[0]
@@ -204,32 +90,6 @@ def choose(list_, question):
                 return list_[choice - 1]
         except ValueError:
             pass
-
-def prepare_parser():
-    parser = argparse.ArgumentParser(description = "By-name, by-time subtitle downloader.")
-
-    parser.add_argument("files", metavar = "FILE", nargs="+",
-        type = os.path.expanduser, help="movie files to open")
-
-    parser.add_argument("-t", "--title", metavar = "STRING", type = str, default = "",
-        help = "force searching for a video with a given title")
-    parser.add_argument("-s", "--season", metavar = "NUMBER", type = int, default = None,
-        help = "force season number to be searched")
-    parser.add_argument("-e", "--episode", metavar = "NUMBER", type = int, default = None,
-        help = "force episode number to be searched")
-
-    parser.add_argument("--one-season", action = "store_true", dest = "one_season",
-        help = "indicate that all videos come from a single season")
-
-    parser.add_argument("-m", "--manual", action = "store_true", dest = "manual_sub",
-        help = "show a subtitle list to choose from")
-
-    parser.add_argument("--no-color", action = "store_false", dest = "no_color",
-        help = "don't color program output")
-
-    parser.add_argument("--debug", action = "store_true", help = "enable debug printing")
-
-    return parser
 
 def parse_input(filename, args):
     title = os.path.basename(os.path.splitext(filename)[0])
@@ -374,8 +234,6 @@ def download(sub, movie_data):
         with open(sub_out_path, 'wb') as out_file:
             out_file.write(decompressed)
 
-        #os.system("/usr/bin/7z x -y -so -piBlm8NTigvru0Jr0 " + f.name + " 2>/dev/null > '" + sub_out_path + "'")
-
     return sub_out_path
 
 def get_soup(url, post_data = None):
@@ -383,12 +241,12 @@ def get_soup(url, post_data = None):
         resp = requests.post(url, post_data)
     else:
         resp = requests.get(url)
-    return BeautifulSoup(resp.text, "html.parser")
+    return bs4.BeautifulSoup(resp.text, "html.parser")
 
 def main():
     if not sys.stdout.isatty():
         log.critical("NapiMan is interactive program. Don't use it in scripts, pipes etc.")
-        sys.exit(2)
+        return ErrorCode.BAD_INPUT
 
     opt_parser = prepare_parser()
     args = opt_parser.parse_args()
@@ -397,8 +255,7 @@ def main():
         log.setLevel(logging.DEBUG)
     log.addHandler(logging.StreamHandler())
 
-    global use_colors
-    use_colors = args.no_color
+    use_colors(args.no_color)
 
     movie_url = None
 
@@ -450,10 +307,13 @@ def main():
                 downloaded_path = download(sub, movie_data)
                 print("  * Downloaded subtitles: %s" % downloaded_path)
             print("")
+
+        except ExceptionWithCode as e:
+            if e.description() is not None:
+                log.critical(str(e))
+            return e.error_code()
         except Exception as e:
             log.error("Exception occured during processing of file %s. Skipping." % filename)
             log.debug(e)
 
-    sys.exit(0)
-
-main()
+    return ErrorCode.NO_ERROR

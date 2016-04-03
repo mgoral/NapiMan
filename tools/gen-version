@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# Very simple version generator
+# First, we'll try to create git-based version and use it. If this method fails, we'll set some kind
+# of fallback version number.
+#
+# Version number is changed in qs/version.py every time make is invoked, so quicksend will always
+# display a proper version number. It's a little hacky, but it works.
+
+VERSION=""
+FALLBACK="0.x-unknown"
+
+nl='
+'
+
+if [ "$VERSION" = "" ]; then
+    if [ -d .git ]; then
+        VERSION=`git describe --abbrev=4 --dirty --always --tags`
+    fi
+fi
+
+if [ "$VERSION" = "" ]; then
+    VERSION=$FALLBACK
+fi
+
+echo $VERSION | tr -d "$nl"

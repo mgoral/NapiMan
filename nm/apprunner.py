@@ -31,6 +31,7 @@ from nm.util import abs_diff, nm_assert, ErrorCode, ExceptionWithCode
 from nm.time import Time
 from nm.datatypes import PageInfo, SubInfo, MovieInfo
 from nm.printing import use_colors, underline, bold, red, purple, blue, green
+from nm.version import __version__
 
 log = logging.getLogger('NapiMan')
 
@@ -57,6 +58,10 @@ def prepare_parser():
         help = "don't color program output")
 
     parser.add_argument("--debug", action = "store_true", help = "enable debug printing")
+
+    parser.add_argument("--version", action = "version",
+            version = "%(prog)s %(version)s" % {"prog" : "%(prog)s", "version" : __version__},
+            help = "print program version")
 
     return parser
 

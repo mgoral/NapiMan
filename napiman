@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# Copyright (C) 2016 Michał Góral.
+#
 # This file is part of NapiMan
 #
 # NapiMan is free software: you can redistribute it and/or modify
@@ -29,18 +31,6 @@ import subprocess
 
 log = logging.getLogger('NapiMan')
 
-try:
-    import requests
-except ImportError:
-    log.critical("request library not installed.")
-    sys.exit(1)
-
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    log.critical("BeautifulSoup4 library not installed.")
-    sys.exit(1)
-
 class Colors:
     PURPLE = '\033[95m'
     BLUE = '\033[94m'
@@ -68,6 +58,18 @@ def red(s):
 
 def bold(s):
     return colorize(s, Colors.BOLD)
+
+try:
+    import requests
+except ImportError:
+    log.critical(red("request library not installed."))
+    sys.exit(1)
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    log.critical(red("BeautifulSoup4 library not installed."))
+    sys.exit(1)
 
 class Time:
     # Yeah, I copied most of things here from Subconvert. Because why not?
@@ -173,11 +175,11 @@ class MovieInfo:
     def __str__(self):
         return "%s, %s" % (bold(os.path.basename(self.path)), self.time_info)
 
-def choose(list_, question, args):
+def choose(list_, question):
     if len(list_) == 0:
         raise Exception("empty list")
 
-    if len(list_) == 1 or args.no_interact:
+    if len(list_) == 1:
         return list_[0]
 
     choice = None
@@ -219,10 +221,12 @@ def prepare_parser():
         help = "force episode number to be searched")
 
     parser.add_argument("--one-season", action = "store_true", dest = "one_season",
-        help = "indicate that all files come from a single season")
+        help = "indicate that all videos come from a single season")
 
-    parser.add_argument("-n", "--non-interactive", action = "store_true", dest = "no_interact",
-        help = "don't ask for help, choose best suited options")
+    parser.add_argument("-m", "--manual", action = "store_true", dest = "manual_sub",
+        help = "show a subtitle list to choose from")
+
+    parser.add_argument("--debug", action = "store_true", help = "enable debug printing")
 
     return parser
 
@@ -302,7 +306,7 @@ def get_movie_page_url(links, name, args):
         log.error("No movies found for a given query: '%s'" % name)
         sys.exit(1)
 
-    page = choose(links, "Many video pages found, please choose one", args)
+    page = choose(links, "Many video pages found, please choose one")
     correct_url = page.url.replace("napisy-", "napisy1,1,1-dla-")
     subpage_url = "http://www.napiprojekt.pl/%s" % correct_url
 
@@ -384,11 +388,23 @@ def main():
     opt_parser = prepare_parser()
     args = opt_parser.parse_args()
 
+    if args.debug:
+        log.setLevel(logging.DEBUG)
+    log.addHandler(logging.StreamHandler())
+
     movie_url = None
 
     for filename in args.files:
+        if not os.path.exists(filename):
+            log.error("%s doesn't exist. Skipping." % red(filename))
+            continue
+
+        print("  * Processing '%s'" % filename)
+
         try:
             name, season, episode = parse_input(filename, args)
+            print("  * Title: %s, season: %s, episode: %s"  % (bold(name), season, episode))
+
             movie_data = get_movie_data(filename)
             if (movie_url is None or not args.one_season):
                 movie_search_post = {
@@ -403,7 +419,6 @@ def main():
                 movie_url = get_movie_page_url(links, name, args)
 
             print("  * %s" % movie_data)
-            print("  * Title: %s, season: %s, episode: %s"  % (bold(name), season, episode))
 
             url = add_season(movie_url, season, episode)
             soup = get_soup(url)
@@ -414,9 +429,15 @@ def main():
                 continue
             else:
                 subs.sort(key=lambda k, md=movie_data: abs_diff(k.time_info, md.time_info))
-                sub = choose(subs, "Many subtitles found, please choose one", args)
+
+                if args.manual_sub:
+                    sub = choose(subs, "Many subtitles found, please choose one")
+                else:
+                    sub = subs[0]
+                    print("  * Chosen subtitles: %s" % sub)
+
                 downloaded_path = download(sub, movie_data)
-                print("  * downloaded subtitles: %s" % green(downloaded_path))
+                print("  * Downloaded subtitles: %s" % green(downloaded_path))
             print("")
         except Exception as e:
             log.error("Exception occured during processing of file %s. Skipping." % filename)

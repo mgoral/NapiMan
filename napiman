@@ -171,7 +171,7 @@ class MovieInfo:
         self.time_info = TimeInfo()
 
     def __str__(self):
-        return "%s, %s" % (bold(os.path.basename(self.path)), self.time_info)
+        return "%s, %s" % (os.path.basename(self.path), self.time_info)
 
 def choose(list_, question):
     if len(list_) == 0:
@@ -445,7 +445,7 @@ def main():
                     sub = choose(subs, "Many subtitles found, please choose one")
                 else:
                     sub = subs[0]
-                    print("  * Best subtitles parameters: %s" % sub.time_info)
+                    print("  * Best subtitle: %s" % sub)
 
                 downloaded_path = download(sub, movie_data)
                 print("  * Downloaded subtitles: %s" % downloaded_path)

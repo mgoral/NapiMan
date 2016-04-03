@@ -1,0 +1,428 @@
+#!/usr/bin/env python3
+
+# This file is part of NapiMap
+#
+# NapiMap is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# NapiMap is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with NapiMap. If not, see <http://www.gnu.org/licenses/>.
+
+import os
+import sys
+import logging
+import argparse
+import re
+import tempfile
+import locale
+import shutil
+import datetime
+
+import subprocess
+
+log = logging.getLogger('NapiMan')
+
+try:
+    import requests
+except ImportError:
+    log.critical("request library not installed.")
+    sys.exit(1)
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    log.critical("BeautifulSoup4 library not installed.")
+    sys.exit(1)
+
+class Colors:
+    PURPLE = '\033[95m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    WARNING = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def colorize(s, c):
+    return "%s%s%s" % (c, s, Colors.ENDC)
+
+def green(s):
+    return colorize(s, Colors.GREEN)
+
+def blue(s):
+    return colorize(s, Colors.BLUE)
+
+def purple(s):
+    return colorize(s, Colors.PURPLE)
+
+def red(s):
+    return colorize(s, Colors.RED)
+
+def bold(s):
+    return colorize(s, Colors.BOLD)
+
+class Time:
+    # Yeah, I copied most of things here from Subconvert. Because why not?
+    def __init__(self, time_string=None, seconds=None):
+        if seconds is None and time_string is not None:
+            self.__from_str(time_string)
+        elif seconds is not None and time_string is None:
+            self.__from_int(float(seconds))
+
+    def __from_int(self, seconds):
+        if seconds >= 0:
+            self._full_seconds = seconds
+        else:
+            raise ValueError("Incorrect seconds value.")
+
+        self._hours = int(seconds / 3600)
+        seconds = round(seconds - self._hours * 3600, 3)
+        self._minutes = int(seconds / 60)
+        seconds = round(seconds - self._minutes * 60, 3)
+        self._seconds = int(seconds)
+        self._miliseconds = int(round(1000 * (seconds - self._seconds)))
+
+    def __from_str(self, value):
+        time = re.match(
+            r"(?P<h>\d+):(?P<m>[0-5][0-9]):(?P<s>[0-5][0-9])(?:$|\.(?P<ms>\d{1,3}))", value)
+
+        if time is None:
+            raise ValueError("Incorrect time format.")
+
+        if time.group('ms') is not None:
+            # ljust explenation:
+            # 10.1 != 10.001
+            # 10.1 == 10.100
+            self._miliseconds = int(time.group('ms').ljust(3, '0'))
+        else:
+            self._miliseconds = 0
+        self._seconds = int(time.group('s'))
+        self._minutes = int(time.group('m'))
+        self._hours = int(time.group('h'))
+        self._full_seconds = (3600*self._hours + 60*self._minutes + self._seconds + float(self._miliseconds)/1000)
+
+    def __str__(self):
+        return "%s:%s:%s.%s" % (self._hours, self._minutes, self._seconds, self._miliseconds)
+
+    def __sub__(self, other):
+        if self._full_seconds < other._full_seconds:
+            raise RuntimeError("Cannot substract higher time from lower")
+
+        result = self._full_seconds - other._full_seconds
+        return Time(seconds = result)
+
+    def __lt__(self, other):
+        return self._full_seconds < other._full_seconds
+
+    def __gt__(self, other):
+        return self._full_seconds > other._full_seconds
+
+def abs_diff(lhs, rhs):
+    if lhs < rhs:
+        return rhs - lhs
+    else:
+        return lhs - rhs
+
+class TimeInfo:
+    def __init__(self):
+        self.fps = None
+        self.length = None
+
+    def __str__(self):
+        return "fps: %s, length: %s" % (green(self.fps), blue(self.length))
+
+    def __sub__(self, other):
+        new = TimeInfo()
+        new.fps = abs_diff(self.fps, other.fps)
+        new.length = abs_diff(self.length, other.length)
+        return new
+
+    def __lt__(self, other):
+        return self.fps < other.fps or (self.fps == other.fps and self.length < other.length)
+
+class PageInfo:
+    def __init__(self):
+        self.url = None
+        self.name = None
+
+    def __str__(self):
+        return self.name
+
+class SubInfo:
+    def __init__(self):
+        self.sub_hash = None
+        self.name = None
+        self.time_info = TimeInfo()
+
+    def __str__(self):
+        return "%s, %s" % (self.name, self.time_info)
+
+class MovieInfo:
+    def __init__(self):
+        self.path = None
+        self.time_info = TimeInfo()
+
+    def __str__(self):
+        return "%s, %s" % (bold(os.path.basename(self.path)), self.time_info)
+
+def choose(list_, question, args):
+    if len(list_) == 0:
+        raise Exception("empty list")
+
+    if len(list_) == 1 or args.no_interact:
+        return list_[0]
+
+    choice = None
+
+    max_num = len("[%d]:" % len(list_))
+
+    print()
+
+    for no, item in enumerate(list_):
+        needed_space = 1 + max_num - len("[%d]:" % int(no + 1))
+        print("   %s[%s]: %s" % (' '.rjust(needed_space), purple(no + 1), str(item)))
+
+    print()
+
+    while True:
+        choice = input("    %s ['q', '1-%d']: " % (question, len(list_)))
+
+        if choice.lower() == "q":
+            sys.exit(1)
+
+        try:
+            choice = int(choice)
+            if choice > 0 and choice <= len(list_):
+                return list_[choice - 1]
+        except ValueError:
+            pass
+
+def prepare_parser():
+    parser = argparse.ArgumentParser(description = "By-name, by-time subtitle downloader.")
+
+    parser.add_argument("files", metavar = "FILE", nargs="+",
+        type = os.path.expanduser, help="movie files to open")
+
+    parser.add_argument("-t", "--title", metavar = "STRING", type = str, default = "",
+        help = "force searching for a video with a given title")
+    parser.add_argument("-s", "--season", metavar = "NUMBER", type = int, default = None,
+        help = "force season number to be searched")
+    parser.add_argument("-e", "--episode", metavar = "NUMBER", type = int, default = None,
+        help = "force episode number to be searched")
+
+    parser.add_argument("--one-season", action = "store_true", dest = "one_season",
+        help = "indicate that all files come from a single season")
+
+    parser.add_argument("-n", "--non-interactive", action = "store_true", dest = "no_interact",
+        help = "don't ask for help, choose best suited options")
+
+    return parser
+
+def parse_input(filename, args):
+    title = os.path.basename(os.path.splitext(filename)[0])
+    season = None
+    episode = None
+
+    season_patterns = [
+        re.compile(r'\bs(?P<s>\d{1,2})e(?P<ep>\d{1,3})\b.*', re.I),
+        re.compile(r'\bs?(?P<s>\d{1,2})x(?P<ep>\d{1,3})\b.*', re.I),
+    ]
+
+    for p in season_patterns:
+        m = p.search(title)
+        if m is not None:
+            season = int(m.group("s"))
+            episode = int(m.group("ep"))
+            title = p.sub("", title)
+            break
+
+    title = re.sub(r'[([{].*[)\]}].*', "", title)
+    title = re.sub(r'\b\w+rip.*', "", title, flags = re.I)
+    title = re.sub(r'\b\d{3,4}p\b.*', "", title, flags = re.I)
+
+    if args.title:
+        title = args.title
+    if args.season:
+        season = args.season
+    if args.episode:
+        episode = args.episode
+
+    return (title.strip(), season, episode)
+
+def get_movie_pages(soup):
+    ret = []
+
+    for link in soup.find_all("a"):
+        if "movieTitleCat" in link.get("class", []):
+            i = PageInfo()
+            i.url = link.get("href")
+            i.name = link.text
+            ret.append(i)
+
+    return ret
+
+def get_subtitles(soup):
+    ret = []
+    for tr in soup.find_all("tr"):
+        if "Autor" in tr.get("title", ""):
+            td_list = tr.find_all("td")
+
+            if len(td_list) < 4:
+                continue
+
+            if td_list[0].a is None:
+                continue
+
+            try:
+                info = SubInfo()
+
+                info.sub_hash = td_list[0].a.get("href").strip()
+                if info.sub_hash.startswith("napiprojekt:"):
+                    info.sub_hash = info.sub_hash[12:]
+
+                info.name = td_list[0].a.text.strip()
+                info.time_info.fps = float(td_list[2].text.strip())
+                info.time_info.length = Time(td_list[3].text.strip())
+                ret.append(info)
+            except Exception as e:
+                log.debug(e)
+                continue
+    return ret
+
+def get_movie_page_url(links, name, args):
+    if (len(links) == 0):
+        log.error("No movies found for a given query: '%s'" % name)
+        sys.exit(1)
+
+    page = choose(links, "Many video pages found, please choose one", args)
+    correct_url = page.url.replace("napisy-", "napisy1,1,1-dla-")
+    subpage_url = "http://www.napiprojekt.pl/%s" % correct_url
+
+    return subpage_url
+
+def add_season(url, season, episode):
+    if season is not None:
+        episode_info = "-s%02d" % season
+        if episode is not None:
+            episode_info = "%se%02d" % (episode_info, episode)
+        return "%s%s" % (url, episode_info)
+    return url
+
+def get_movie_data(filename):
+    command = ['mplayer',
+        '-really-quiet', '-vo', 'null', '-ao', 'null', '-frames', '0', '-identify', filename]
+    out = subprocess.check_output(command, stderr = subprocess.DEVNULL)
+
+    ret = MovieInfo()
+    ret.path = filename
+    ret.time_info.fps = float(re.search(r'ID_VIDEO_FPS=([\w/.]+)\s?', str(out)).group(1))
+    ret.time_info.length = Time(
+        seconds = float(re.search(r'ID_LENGTH=([\w/.]+)\s?', str(out)).group(1)))
+    return ret
+
+def napi_f(z):
+    idx = [ 0xe, 0x3,  0x6, 0x8, 0x2 ]
+    mul = [   2,   2,    5,   4,   3 ]
+    add = [   0, 0xd, 0x10, 0xb, 0x5 ]
+
+    b = []
+    for i in range(len(idx)):
+        a = add[i]
+        m = mul[i]
+        i = idx[i]
+
+        t = a + int(z[i], 16)
+        v = int(z[t:t+2], 16)
+        b.append( ("%x" % (v*m))[-1] )
+
+    return ''.join(b)
+
+def download(sub, movie_data):
+    url= "http://napiprojekt.pl/unit_napisy/dl.php"
+
+    data = {
+        "f" : sub.sub_hash, "t" : napi_f(sub.sub_hash),
+        "l" : "PL",
+        "v" : "other",
+        "kolejka" : "false",
+        "nick" : "", "pass" : "",
+        "napios" : os.name
+    }
+
+    sub_out_path = None
+    with tempfile.NamedTemporaryFile() as f:
+        resp = requests.get(url, data)
+        f.write(resp.content)
+        sub_out_path = "%s.txt" % os.path.splitext(movie_data.path)[0]
+        cmd = ["7z", "x", "-y", "-so", "-piBlm8NTigvru0Jr0", f.name]
+
+        decompressed = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+
+        with open(sub_out_path, 'wb') as out_file:
+            out_file.write(decompressed)
+
+        #os.system("/usr/bin/7z x -y -so -piBlm8NTigvru0Jr0 " + f.name + " 2>/dev/null > '" + sub_out_path + "'")
+
+    return sub_out_path
+
+def get_soup(url, post_data = None):
+    if post_data is not None:
+        resp = requests.post(url, post_data)
+    else:
+        resp = requests.get(url)
+    return BeautifulSoup(resp.text, "html.parser")
+
+def main():
+    opt_parser = prepare_parser()
+    args = opt_parser.parse_args()
+
+    movie_url = None
+
+    for filename in args.files:
+        try:
+            name, season, episode = parse_input(filename, args)
+            movie_data = get_movie_data(filename)
+            if (movie_url is None or not args.one_season):
+                movie_search_post = {
+                    "queryString" : name,
+                    "queryKind" : "0",
+                    "queryYear" : "",
+                    "associate" : ""
+                }
+                catalog_url = "http://www.napiprojekt.pl/ajax/search_catalog.php"
+                soup = get_soup(catalog_url, movie_search_post)
+                links = get_movie_pages(soup)
+                movie_url = get_movie_page_url(links, name, args)
+
+            print("  * %s" % movie_data)
+            print("  * Title: %s, season: %s, episode: %s"  % (bold(name), season, episode))
+
+            url = add_season(movie_url, season, episode)
+            soup = get_soup(url)
+            subs = get_subtitles(soup)
+
+            if (len(subs) == 0):
+                print("  * %s" % bold(red("No subtitles found!")))
+                continue
+            else:
+                subs.sort(key=lambda k, md=movie_data: abs_diff(k.time_info, md.time_info))
+                sub = choose(subs, "Many subtitles found, please choose one", args)
+                downloaded_path = download(sub, movie_data)
+                print("  * downloaded subtitles: %s" % green(downloaded_path))
+            print("")
+        except Exception as e:
+            log.error("Exception occured during processing of file %s. Skipping." % filename)
+            log.debug(e)
+
+
+    return 0
+
+main()

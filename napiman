@@ -31,6 +31,8 @@ import subprocess
 
 log = logging.getLogger('NapiMan')
 
+use_colors = True
+
 class Colors:
     PURPLE = '\033[95m'
     BLUE = '\033[94m'
@@ -42,7 +44,9 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 def colorize(s, c):
-    return "%s%s%s" % (c, s, Colors.ENDC)
+    if use_colors is True:
+        return "%s%s%s" % (c, s, Colors.ENDC)
+    return s
 
 def green(s):
     return colorize(s, Colors.GREEN)
@@ -226,6 +230,9 @@ def prepare_parser():
     parser.add_argument("-m", "--manual", action = "store_true", dest = "manual_sub",
         help = "show a subtitle list to choose from")
 
+    parser.add_argument("--no-color", action = "store_false", dest = "no_color",
+        help = "don't color program output")
+
     parser.add_argument("--debug", action = "store_true", help = "enable debug printing")
 
     return parser
@@ -395,6 +402,9 @@ def main():
     if args.debug:
         log.setLevel(logging.DEBUG)
     log.addHandler(logging.StreamHandler())
+
+    global use_colors
+    use_colors = args.no_color
 
     movie_url = None
 

@@ -49,9 +49,6 @@ def prepare_parser():
     parser.add_argument("-e", "--episode", metavar = "NUMBER", type = int, default = None,
         help = "force episode number to be searched")
 
-    parser.add_argument("--one-season", action = "store_true", dest = "one_season",
-        help = "indicate that all videos come from a single season")
-
     parser.add_argument("-m", "--manual", action = "store_true", dest = "manual_sub",
         help = "show a subtitle list to choose from")
 
@@ -249,7 +246,7 @@ def main():
 
     use_colors(args.no_color)
 
-    movie_url = None
+    selected_movies = {}
 
     for filename in args.files:
         if not os.path.exists(filename):
@@ -262,7 +259,11 @@ def main():
             name, season, episode = parse_input(filename, args)
             movie_data = get_movie_data(filename)
 
-            if (movie_url is None or not args.one_season):
+            queries_key = "%s-%s" % (name, season)
+
+            movie_url = selected_movies.get(name)
+
+            if (movie_url is None):
                 movie_search_post = {
                     "queryString" : name,
                     "queryKind" : "0",
@@ -277,6 +278,7 @@ def main():
                 soup = get_soup(catalog_url, movie_search_post)
                 links = get_movie_pages(soup)
                 movie_url = get_movie_page_url(links, name, args)
+                selected_movies[name] = movie_url
 
             print("  * Video: %s" % movie_data)
 

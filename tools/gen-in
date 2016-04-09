@@ -13,4 +13,5 @@ APP_NAME=napiman
 
 sed -e "s|@PACKAGE_NAME[@]|$APP_NAME|g" \
     -e "s|@VERSION[@]|$($SCRIPT_DIR/gen-version)|g" \
+    -e "s|@NAPIMAN_DIR[@]|$(dirname $SCRIPT_DIR)|g" \
     $IN_FILE

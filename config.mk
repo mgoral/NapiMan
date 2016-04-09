@@ -11,6 +11,7 @@ PREFIX=${HOME}/.local
 ##
 
 BUILD_DIR = build
+VENV_DIR = .venv
 SRC_DIR = nm
 
 ####################################################################################################
@@ -22,3 +23,11 @@ RM = rm -f
 MKDIR = mkdir -p
 INSTALL?=install
 GEN=tools/gen-in
+VIRTUALENV = virtualenv
+
+####################################################################################################
+## Other settings
+##
+
+# Python version to be used
+PYTHON_VER = python3

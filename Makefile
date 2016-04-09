@@ -15,6 +15,9 @@ ZIP_EXCLUDE_FLAGS=$(foreach e, $(ZIP_EXCLUDES), -x $e)
 PYTHON_SOURCES=$(shell find $(SRC_DIR) -type f -name '*.py') \
 			   __main__.py
 
+# DO NOT CHANGE IT or it may break napiman-start.in
+VENV_DIR = .venv
+
 INSTALL_PATH=$(DESTDIR)$(PREFIX)
 
 .PHONY: all
@@ -38,11 +41,12 @@ clean:
 	$(RM) "$(GEN_FILES)"
 
 .PHONY: bootstrap
-bootstrap: $(VENV_DIR)
+bootstrap: $(VENV_DIR)/bin/activate
 
-$(VENV_DIR):
-	@$(VIRTUALENV) --python="$(PYTHON_VER)" "$(VENV_DIR)"
-	@. $(VENV_DIR)/bin/activate && pip install -r requirements.txt
+$(VENV_DIR)/bin/activate: requirements.txt
+	@test -d $(VENV_DIR) || $(VIRTUALENV) --python="$(PYTHON_VER)" "$(VENV_DIR)"
+	@$(VENV_DIR)/bin/pip install -Ur $<
+	@touch $(VENV_DIR)/bin/activate
 
 $(EXEC_PATH): $(EXEC_PATH).zip
 	@$(RM) "$@"

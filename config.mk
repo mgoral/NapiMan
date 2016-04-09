@@ -7,21 +7,14 @@ EXECUTABLE=napiman
 PREFIX=${HOME}/.local
 
 ####################################################################################################
-## Directories
-##
-
-BUILD_DIR = build
-SRC_DIR = nm
-
-####################################################################################################
 ## Important commands
 ##
 
 CD = cd
 RM = rm -f
 MKDIR = mkdir -p
-INSTALL?=install
-GEN=tools/gen-in
+INSTALL ?= install
+GEN = tools/gen-in
 VIRTUALENV = virtualenv
 
 ####################################################################################################

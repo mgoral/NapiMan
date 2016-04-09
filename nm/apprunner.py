@@ -26,6 +26,7 @@ import subprocess
 
 import requests
 import bs4
+import guessit
 
 from nm.util import abs_diff, nm_assert, ErrorCode, ExceptionWithCode
 from nm.time import Time
@@ -98,25 +99,11 @@ def choose(list_, question):
 
 def parse_input(filename, args):
     title = os.path.basename(os.path.splitext(filename)[0])
-    season = None
-    episode = None
+    found_dict = guessit.guessit(title)
 
-    season_patterns = [
-        re.compile(r'\bs(?P<s>\d{1,2})e(?P<ep>\d{1,3})\b.*', re.I),
-        re.compile(r'\bs?(?P<s>\d{1,2})x(?P<ep>\d{1,3})\b.*', re.I),
-    ]
-
-    for p in season_patterns:
-        m = p.search(title)
-        if m is not None:
-            season = int(m.group("s"))
-            episode = int(m.group("ep"))
-            title = p.sub("", title)
-            break
-
-    title = re.sub(r'[([{].*[)\]}].*', "", title)
-    title = re.sub(r'\b\w+rip.*', "", title, flags = re.I)
-    title = re.sub(r'\b\d{3,4}p\b.*', "", title, flags = re.I)
+    title = found_dict.get("title", title)
+    season = found_dict.get("season")
+    episode = found_dict.get("episode")
 
     if args.title:
         title = args.title

@@ -21,10 +21,10 @@ ZIP_EXCLUDE_FLAGS=$(foreach e, $(ZIP_EXCLUDES), -x $e)
 PYTHON_SOURCES=$(shell find $(SRC_DIR) -type f -name '*.py') \
 			   __main__.py
 
-# DO NOT CHANGE IT or it may break napiman-start.in
-VENV_DIR = .venv
+INSTALL_PATH=$(DESTDIR)$(prefix)
+VENV_DIR = $(INSTALL_PATH)/share/napiman/venv
 
-INSTALL_PATH=$(DESTDIR)$(PREFIX)
+GEN = NAPIMAN_VENV_DIR=$(VENV_DIR) tools/gen-in
 
 .PHONY: all
 all: $(EXEC_PATH)
@@ -38,12 +38,11 @@ install: all bootstrap napiman-start
 .PHONY: uninstall
 uninstall:
 	$(RM) "$(INSTALL_PATH)/bin/$(EXECUTABLE)"
-	$(RM) "$(VENV_DIR)/bin/$(EXECUTABLE)"
+	$(RM) -rf "$(INSTALL_PATH)/share/napiman"
 
 .PHONY: clean
 clean:
 	$(RM) -r "$(BUILD_DIR)"
-	$(RM) -r "$(VENV_DIR)"
 	$(RM) "$(GEN_FILES)"
 
 .PHONY: bootstrap

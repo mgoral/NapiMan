@@ -17,12 +17,17 @@ searches and downloads. To learn more about them, type `napiman -h`.
 Installation is quite simple: just type `make install`. If you wish to install
 in a different prefix than the default one (`$HOME/.local`), you can edit a
 `config.mk` file. NapiMan also respects `$DESTDIR` environment variable, so the
-full installation path is in fact `${DESTDIR}${PREFIX}`.
+full installation path is in fact `${DESTDIR}${prefix}`. You can also set
+prefix when calling make: `make install prefix=/usr`.
 
 When installing, NapiMan will create a [virtualenv][venv] and download all its
 dependencies so you are required to only have a virtualenv installed and
 accessible in your `$PATH`. NapiMan dependencies are listed in
 [requirements.txt][reqs].
+
+If your system has all dependencies installed (or you simply don't want create a
+virtualenv), just call `make` and grab the executable from a `build` directory.
+You can call it directly.
 
 # Legal issues
 

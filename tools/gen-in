@@ -6,12 +6,14 @@ if [[ $# -ne 1 ]]; then
     exit 1
 fi
 
-IN_FILE="$1"
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+in_file="$1"
+script_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-APP_NAME=napiman
+app_name=${NAPIMAN_APP_NAME:=napiman}
+venv_dir=${NAPIMAN_VENV_DIR:=.venv}
 
-sed -e "s|@PACKAGE_NAME[@]|$APP_NAME|g" \
-    -e "s|@VERSION[@]|$($SCRIPT_DIR/gen-version)|g" \
-    -e "s|@NAPIMAN_DIR[@]|$(dirname $SCRIPT_DIR)|g" \
-    $IN_FILE
+sed -e "s|@PACKAGE_NAME[@]|$app_name|g" \
+    -e "s|@VERSION[@]|$($script_dir/gen-version)|g" \
+    -e "s|@NAPIMAN_DIR[@]|$(dirname $script_dir)|g" \
+    -e "s|@VENV_DIR[@]|$venv_dir|g" \
+    $in_file
